@@ -192,3 +192,81 @@ describe('generateReply — Anthropic', () => {
     expect(body.messages).toHaveLength(1)
   })
 })
+
+describe('generateReply — OpenRouter', () => {
+  it('calls the chat completions endpoint and returns the reply', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        choices: [{ message: { content: 'Sure — happy to help via OpenRouter!' } }],
+        usage: { prompt_tokens: 35, completion_tokens: 12, total_tokens: 47 },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({ provider: 'openrouter', model: 'openai/gpt-4o-mini', apiKey: 'sk-or-v1-test' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hi' }],
+    })
+
+    expect(res).toEqual({
+      text: 'Sure — happy to help via OpenRouter!',
+      handoff: false,
+      usage: { promptTokens: 35, completionTokens: 12, totalTokens: 47 },
+    })
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toContain('openrouter.ai')
+    expect(opts.headers.Authorization).toBe('Bearer sk-or-v1-test')
+    expect(opts.headers['HTTP-Referer']).toBe('https://wacrm.app')
+    expect(opts.headers['X-Title']).toBe('wacrm')
+  })
+
+  it('maps a 401 to an invalid_key AiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        errResponse(401, { error: { message: 'User key not found' } }),
+      ),
+    )
+
+    await expect(
+      generateReply({
+        config: config({ provider: 'openrouter' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_key', status: 401 })
+  })
+
+  it('throws on an empty completion', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(okResponse({ choices: [{ message: { content: '' } }] })),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'openrouter' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toBeInstanceOf(AiError)
+  })
+
+  it('detects handoff in the model output', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          choices: [{ message: { content: 'I cannot help [[HANDOFF]]' } }],
+        }),
+      ),
+    )
+    const res = await generateReply({
+      config: config({ provider: 'openrouter' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Help' }],
+    })
+    expect(res.handoff).toBe(true)
+    expect(res.text).toBe('I cannot help')
+  })
+})
