@@ -6,7 +6,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci || npm install
+RUN npm ci
 
 # ---------------------------------------------------------------
 # Stage 2 — build
